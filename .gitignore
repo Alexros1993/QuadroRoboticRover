@@ -1,0 +1,43 @@
+# --- Тимчасові файли компіляції (Build artifacts) ---
+Debug/
+Release/
+bin/
+obj/
+*.list
+*.map
+*.elf
+*.hex
+*.bin
+*.o
+*.d
+*.su
+*.cyclo
+
+# --- Специфічні файли IDE (STM32CubeIDE/Eclipse) ---
+.settings/
+.launches/
+*.launch
+.gdbinit
+
+# --- Тимчасові файли конфігуратора CubeMX ---
+# Якщо ти хочеш зберігати лише конфігурацію (.ioc),
+# то ігноруй бекапи, які створює CubeMX
+.mxproject
+*.bak
+
+# --- Логи та тимчасові файли ОС ---
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# --- Файли інших популярних IDE (про всяк випадок) ---
+# Keil
+*.uvoptx
+*.uvguix.*
+*.uvprojx
+Listings/
+Objects/
+
+# VS Code
+.vscode/
