@@ -19,6 +19,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
+#include <sys/stat.h>
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -37,6 +39,7 @@ typedef struct
 
   uint16_t current_steps;
   uint32_t last_move_time;
+  uint8_t is_inverted;
 } ServoTypeDef;
 /* USER CODE END PTD */
 
@@ -46,6 +49,8 @@ typedef struct
 #define MODE1_ADDR 0x00
 #define MODE2_ADDR 0x01
 #define PRESCL_ADDR 0xFE
+#define SERVO_MAX 512
+#define SERVO_MIN 102
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,6 +61,10 @@ typedef struct
 /* Private variables ---------------------------------------------------------*/
 
 I2C_HandleTypeDef hi2c1;
+I2C_HandleTypeDef hi2c2;
+
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
 
@@ -66,6 +75,9 @@ void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_I2C2_Init(void);
+static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void PCA9685_Init(void);
 void PCA9685_Set_Servo_Pos(uint8_t channel, uint16_t angle_value, uint16_t phase_shift);
@@ -78,6 +90,7 @@ void PCA9685_Init(void)
 {
   uint8_t sleep = 0x11;
   HAL_I2C_Mem_Write(&hi2c1,PCA9685_ADDR << 1,MODE1_ADDR,I2C_MEMADD_SIZE_8BIT,&sleep,sizeof(sleep),500);
+  HAL_Delay(1);
 
   uint8_t prescaler = 0x79;
   HAL_I2C_Mem_Write(&hi2c1,PCA9685_ADDR << 1,PRESCL_ADDR,I2C_MEMADD_SIZE_8BIT,&prescaler,sizeof(prescaler),500);
@@ -106,7 +119,15 @@ void PCA9685_Set_Servo_Pos(const uint8_t channel, const uint16_t angle_value, co
 void PCA9685_Smooth_Move_To_Degree(ServoTypeDef* servo_type_def, const uint8_t degree,const uint8_t delay)
 {
   static const uint8_t degree_180 = 180;
-  const uint32_t target_steps = servo_type_def->min_steps + (degree * (servo_type_def->max_steps - servo_type_def->min_steps) / degree_180);
+  uint16_t updated_degree;
+  if (servo_type_def->is_inverted ==  1)
+  {
+    updated_degree = degree_180 - degree;
+  } else
+  {
+    updated_degree = degree;
+  }
+  const uint32_t target_steps = servo_type_def->min_steps + (updated_degree * (servo_type_def->max_steps - servo_type_def->min_steps) / degree_180);
 
   if (target_steps > servo_type_def->max_steps || target_steps < servo_type_def->min_steps)
   {
@@ -116,11 +137,6 @@ void PCA9685_Smooth_Move_To_Degree(ServoTypeDef* servo_type_def, const uint8_t d
   const uint32_t now = HAL_GetTick();
   if ((now - servo_type_def->last_move_time) > delay)
   {
-    if (servo_type_def->current_steps == 0)
-    {
-      return;
-    }
-
     int16_t direction = 0;
     if (servo_type_def->current_steps > target_steps)
     {
@@ -179,35 +195,87 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
+  MX_I2C2_Init();
+  MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   ServoTypeDef PCA9685_Servo_1 = {
     0,
     0,
     0,
-    580,
-    90,
-    90,
+    SERVO_MAX,
+    SERVO_MIN,
+    SERVO_MAX,
     HAL_GetTick(),
+    1,
   };
 
+  ServoTypeDef PCA9685_Servo_2 = {
+    1,
+    0x400,
+    0,
+    SERVO_MAX,
+    SERVO_MIN,
+    SERVO_MIN,
+    HAL_GetTick(),
+    0,
+  };
+
+  ServoTypeDef PCA9685_Servo_3 = {
+    2,
+    0x800,
+    0,
+    SERVO_MAX,
+    SERVO_MIN,
+    SERVO_MIN,
+    HAL_GetTick(),
+    0,
+  };
+
+  ServoTypeDef PCA9685_Servo_4 = {
+    3,
+    0xC00,
+    0,
+    SERVO_MAX,
+    SERVO_MIN,
+    SERVO_MAX,
+    HAL_GetTick(),
+    1
+  };
   PCA9685_Init();
+
+  HAL_Delay(10);
+
+  PCA9685_Set_Servo_Pos(0,SERVO_MAX,0);
+  PCA9685_Set_Servo_Pos(1,SERVO_MIN,0x400);
+  PCA9685_Set_Servo_Pos(2,SERVO_MIN,0x800);
+  PCA9685_Set_Servo_Pos(3,SERVO_MAX,0xC00);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
   // ReSharper disable once CppDFAEndlessLoop
-  HAL_GPIO_WritePin(PCA_OE_GPIO_Port, PCA_OE_Pin, GPIO_PIN_RESET);
+
 
   PCA9685_Servo_1.is_moving = 1;
-  while (PCA9685_Servo_1.is_moving != 0)
-  {
-    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_1, 45, 10);
-  }
+  PCA9685_Servo_2.is_moving = 1;
+  PCA9685_Servo_3.is_moving = 1;
+  PCA9685_Servo_4.is_moving = 1;
+
+  HAL_Delay(100);
+
+  HAL_GPIO_WritePin(PCA_OE_GPIO_Port, PCA_OE_Pin, GPIO_PIN_RESET);
 
   while (1)
   {
+    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_1,  60, 5);
+    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_2, 60, 5);
+    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_3,  60, 5);
+    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_4, 60, 5);
     /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -321,6 +389,169 @@ static void MX_I2C1_Init(void)
 }
 
 /**
+  * @brief I2C2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C2_Init(void)
+{
+
+  /* USER CODE BEGIN I2C2_Init 0 */
+
+  /* USER CODE END I2C2_Init 0 */
+
+  /* USER CODE BEGIN I2C2_Init 1 */
+
+  /* USER CODE END I2C2_Init 1 */
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.Timing = 0x60404E72;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c2, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c2, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C2_Init 2 */
+
+  /* USER CODE END I2C2_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_IC_InitTypeDef sConfigIC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 274;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 4294967295;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_IC_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
+  sSlaveConfig.InputTrigger = TIM_TS_TI1FP1;
+  sSlaveConfig.TriggerPolarity = TIM_INPUTCHANNELPOLARITY_BOTHEDGE;
+  sSlaveConfig.TriggerFilter = 0;
+  if (HAL_TIM_SlaveConfigSynchro(&htim2, &sSlaveConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_BOTHEDGE;
+  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
+  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
+  sConfigIC.ICFilter = 0;
+  if (HAL_TIM_IC_ConfigChannel(&htim2, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 0;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM2;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -333,19 +564,46 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(PCA_OE_GPIO_Port, PCA_OE_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOE, BIN1_Pin|BIN2_Pin|GPIO_PIN_15, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PCA_OE_Pin */
-  GPIO_InitStruct.Pin = PCA_OE_Pin;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(HC_Trig_GPIO_Port, HC_Trig_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, AIN1_Pin|AIN2_Pin|STBY_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(PCA_OE_GPIO_Port, PCA_OE_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pins : BIN1_Pin BIN2_Pin PE15 */
+  GPIO_InitStruct.Pin = BIN1_Pin|BIN2_Pin|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(PCA_OE_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : HC_Trig_Pin */
+  GPIO_InitStruct.Pin = HC_Trig_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(HC_Trig_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : AIN1_Pin AIN2_Pin STBY_Pin PCA_OE_Pin */
+  GPIO_InitStruct.Pin = AIN1_Pin|AIN2_Pin|STBY_Pin|PCA_OE_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*AnalogSwitch Config */
+  HAL_SYSCFG_AnalogSwitchConfig(SYSCFG_SWITCH_PA1, SYSCFG_SWITCH_PA1_CLOSE);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
