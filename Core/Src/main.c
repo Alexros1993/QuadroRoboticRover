@@ -19,8 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
-#include <sys/stat.h>
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -40,6 +38,7 @@ typedef struct
   uint16_t current_steps;
   uint32_t last_move_time;
   uint8_t is_inverted;
+  uint16_t trim;
 } ServoTypeDef;
 /* USER CODE END PTD */
 
@@ -67,7 +66,7 @@ TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
-
+static const uint8_t step = (SERVO_MAX - SERVO_MIN) / 180;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -127,7 +126,9 @@ void PCA9685_Smooth_Move_To_Degree(ServoTypeDef* servo_type_def, const uint8_t d
   {
     updated_degree = degree;
   }
-  const uint32_t target_steps = servo_type_def->min_steps + (updated_degree * (servo_type_def->max_steps - servo_type_def->min_steps) / degree_180);
+  const uint32_t target_steps = (servo_type_def->min_steps +
+      (updated_degree * (servo_type_def->max_steps - servo_type_def->min_steps) / degree_180)
+    ) + servo_type_def->trim;
 
   if (target_steps > servo_type_def->max_steps || target_steps < servo_type_def->min_steps)
   {
@@ -208,6 +209,7 @@ int main(void)
     SERVO_MAX,
     HAL_GetTick(),
     1,
+    0
   };
 
   ServoTypeDef PCA9685_Servo_2 = {
@@ -219,6 +221,7 @@ int main(void)
     SERVO_MIN,
     HAL_GetTick(),
     0,
+    0
   };
 
   ServoTypeDef PCA9685_Servo_3 = {
@@ -230,6 +233,7 @@ int main(void)
     SERVO_MIN,
     HAL_GetTick(),
     0,
+    0
   };
 
   ServoTypeDef PCA9685_Servo_4 = {
@@ -240,16 +244,17 @@ int main(void)
     SERVO_MIN,
     SERVO_MAX,
     HAL_GetTick(),
-    1
+    1,
+    0
   };
   PCA9685_Init();
 
   HAL_Delay(10);
 
-  PCA9685_Set_Servo_Pos(0,SERVO_MAX,0);
-  PCA9685_Set_Servo_Pos(1,SERVO_MIN,0x400);
-  PCA9685_Set_Servo_Pos(2,SERVO_MIN,0x800);
-  PCA9685_Set_Servo_Pos(3,SERVO_MAX,0xC00);
+  PCA9685_Set_Servo_Pos(0,SERVO_MAX + PCA9685_Servo_1.trim,0);
+  PCA9685_Set_Servo_Pos(1,SERVO_MIN + PCA9685_Servo_2.trim,0x400);
+  PCA9685_Set_Servo_Pos(2,SERVO_MIN + PCA9685_Servo_3.trim,0x800);
+  PCA9685_Set_Servo_Pos(3,SERVO_MAX + PCA9685_Servo_4.trim,0xC00);
 
   /* USER CODE END 2 */
 
@@ -266,14 +271,25 @@ int main(void)
 
   HAL_Delay(100);
 
-  HAL_GPIO_WritePin(PCA_OE_GPIO_Port, PCA_OE_Pin, GPIO_PIN_RESET);
+  //HAL_GPIO_WritePin(PCA_OE_GPIO_Port, PCA_OE_Pin, GPIO_PIN_RESET);
+
+  HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_2);
+
+  HAL_GPIO_WritePin(STBY_GPIO_Port, STBY_Pin, GPIO_PIN_SET);
+
+  HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_RESET);
+
+  HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_RESET);
 
   while (1)
   {
-    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_1,  60, 5);
-    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_2, 60, 5);
-    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_3,  60, 5);
-    PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_4, 60, 5);
+    // PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_1,  90, 30);
+    // PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_2, 90, 30);
+    // PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_3,  90, 30);
+    // PCA9685_Smooth_Move_To_Degree(&PCA9685_Servo_4, 90, 30);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -516,9 +532,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 0;
+  htim3.Init.Prescaler = 274;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 65535;
+  htim3.Init.Period = 99;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
@@ -532,7 +548,7 @@ static void MX_TIM3_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
+  sConfigOC.Pulse = 30;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
